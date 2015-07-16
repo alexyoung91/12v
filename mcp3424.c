@@ -15,10 +15,7 @@ void mcp3424_init(mcp3424 *m, int fd, uint8_t addr, enum mcp3424_bit_rate rate) 
 	m->fd = fd;
 	m->addr = addr;
 	m->config = 0x00;
-	m->pga = 0.5f;
-	m->lsb = 0.0000078125f;
 	m->err = MCP3424_OK;
-
 	mcp3424_set_bit_rate(m, rate);
 	mcp3424_set_conversion_mode(m, MCP3424_CONVERSION_MODE_ONE_SHOT);
 }
@@ -38,8 +35,21 @@ void mcp3424_set_pga(mcp3424 *m, enum mcp3424_pga pga) {
 	m->config |= pga;
 }
 
+enum mcp3424_bit_rate mcp3424_get_bit_rate(mcp3424 *m) {
+	return (m->config >> 2) & 0x03;
+}
+
+enum mcp3424_conversion_mode mcp3424_get_conversion_mode(mcp3424 *m) {
+	return (m->config >> 4) & 0x03;
+}
+
+enum mcp3424_pga mcp3424_get_pga(mcp3424 *m) {
+	return m->config & 0x03;
+}
+
 unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 	int rv;
+	int n;
 	unsigned int raw;
 
 	mcp3424_set_channel(m, channel);
@@ -48,13 +58,12 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 	if (rv == -1) {
 		snprintf(m->errstr, MCP3424_ERR_LEN, "ioctl: %s", strerror(errno));
 		m->err = MCP3424_ERR;
-		goto done;
+		return 0;
 	}
 
-	raw = 0;
+	// will this ever read for than 4 bytes?
+	n = i2c_smbus_read_block_data(m->fd, m->config, m->reading);
 
-	//i2c_smbus_read_word_data
 
-done:
 	return raw;
 }

@@ -37,18 +37,21 @@ typedef struct {
 	int fd;
 	uint8_t addr;
 	uint8_t config;
-	enum mcp3424_bit_rate rate;
-	float pga;
-	float lsb;
 	uint8_t reading[4];
 	int err;
 	char errstr[MCP3424_ERR_LEN];
 } mcp3424;
 
 void mcp3424_init(mcp3424 *m, int fd, uint8_t addr, enum mcp3424_bit_rate rate);
+
 void mcp3424_set_bit_rate(mcp3424 *m, enum mcp3424_bit_rate rate);
 void mcp3424_set_conversion_mode(mcp3424 *m, enum mcp3424_conversion_mode mode);
 void mcp3424_set_pga(mcp3424 *m, enum mcp3424_pga pga);
+
+enum mcp3424_bit_rate mcp3424_get_bit_rate(mcp3424 *m);
+enum mcp3424_conversion_mode mcp3424_get_conversion_mode(mcp3424 *m);
+enum mcp3424_pga mcp3424_get_pga(mcp3424 *m);
+
 unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel);
 
 #endif /* MCP3424_H_ */

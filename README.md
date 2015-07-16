@@ -5,10 +5,10 @@
 ## Dependencies
 
 - [bcm2835](http://www.airspayce.com/mikem/bcm2835/)
-- [i2c-tools](https://packages.debian.org/jessie/i2c-tools)
+- [libi2c-dev](https://packages.debian.org/jessie/libi2c-dev)
 - [libncurses5-dev](https://packages.debian.org/jessie/libncurses5-dev)
 
-bcm2835 has to be built and installed manually, i2c-tools and libncurses5-dev can be installed with `sudo apt-get install i2c-tools libncurses5-dev` on debian based distros.
+bcm2835 has to be built and installed manually, libi2c-dev and libncurses5-dev can be installed with `sudo apt-get install libi2c-dev libncurses5-dev` on debian based distros.
 
 ## Building
 
