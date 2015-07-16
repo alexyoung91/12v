@@ -10,11 +10,13 @@
 #include <bcm2835.h>
 #include "mcp3424.h"
 
-#define STUBBED(str) printf("STUBBED: %s\n", str)
 #define MAP(val, from_min, from_max, to_min, to_max) \
 	((val - from_min) * ((to_max - to_min) / (from_max - from_min))) + to_min
 
 /* ====== Configuration values ====== */
+
+#define ADCV_ADDR 0x68 // voltage
+#define ADCI_ADDR 0x69 // current
 
 #define BAT_LOW_V 12.0f // v
 #define BAT_LOW_V_HYS 1.0f // change in v
@@ -50,29 +52,32 @@ typedef struct {
 
 /* ====== Prototypes ====== */
 
+static void read_battery_state(battery *bat);
+static void read_wind_turbine_state(wind_turbine *wt);
+static void read_solar_panel_state(solar_panel *sp);
 static void sig_handler(int sig, siginfo_t *siginfo, void *context);
-const char *get_bus_id(void);
-void use_battery(void);
-void use_mains(void);
-void display(void);
+static int get_rpi_revision(char *rev);
+static void use_battery(void);
+static void use_mains(void);
+static void display(void);
 
 /* ====== Globals ====== */
 
+static mcp3424 adcv, adci;
 static int running;
 static system_12v sys;
+static battery bat;
 static wind_turbine wt;
 static solar_panel sp;
-static battery bat;
 
 /* ====== Entry ====== */
 
 int main(int argc, char **argv) {
 	int rv;
-	struct sigaction act;
+	char rev[32];
+	const char *filename;
 	int fd;
-	const char *bus;
-	mcp3424 m;
-	unsigned int raw;
+	struct sigaction act;
 
 	/* ====== BCM2835 ====== */
 
@@ -91,22 +96,25 @@ int main(int argc, char **argv) {
 	/* ====== MCP3424 ====== */
 
 	printf("initialising mcp3424...\n");
-	//bus = get_bus_id();
-	STUBBED("get_bus_id (for testing on non rpi)");
-	bus = NULL;
-	if (!bus) {
-		printf("error: could not determine bus id\n");
+	rv = get_rpi_revision(rev);
+	if (rv == 0) {
+		printf("error: could not determine raspberry pi revision\n");
 		return EXIT_FAILURE;
 	}
+	if (strcmp(rev, "0002") == 0 || strcmp(rev, "0003") == 0) {
+		filename = "/dev/i2c-0";
+	} else {
+		filename = "/dev/i2c-1";
+	}
 
-	fd = open(bus, O_RDWR);
-
+	fd = open(filename, O_RDWR);
 	if (fd == -1) {
-		printf("error: could not open %s: %s\n", bus, strerror(errno));
+		printf("error: could not open %s: %s\n", filename, strerror(errno));
 		return EXIT_FAILURE;
 	}
 
-	mcp3424_init(&m, fd, 0x68, MCP3424_BIT_RATE_14);
+	mcp3424_init(&adcv, fd, ADCV_ADDR, MCP3424_BIT_RATE_14);
+	mcp3424_init(&adci, fd, ADCI_ADDR, MCP3424_BIT_RATE_14);
 
 	/* ====== Interrupt handling ====== */
 
@@ -124,23 +132,17 @@ int main(int argc, char **argv) {
 	memset(&sys, 0, sizeof (system_12v));
 	sys.source = SOURCE_BATTERY;
 
+	memset(&bat, 0, sizeof (battery));
 	memset(&wt, 0, sizeof (wind_turbine));
 	memset(&sp, 0, sizeof (solar_panel));
-	memset(&bat, 0, sizeof (battery));
 
 	initscr();
 
 	running = 1;
 	while (running) {
-		/*
-		* read battery voltage from MCP3424 ADC
-		*/
-		raw = mcp3424_get_raw(&m, MCP3424_CHANNEL_1);
-		if (m.err == MCP3424_ERR) {
-			printf("error: mcp3424_get_raw: %s\n", m.errstr);
-			return EXIT_FAILURE;
-		}
-		bat.v = MAP(raw, 0, 9999, 0.0, 16.0);
+		read_battery_state(&bat);
+		read_wind_turbine_state(&wt);
+		read_solar_panel_state(&sp);
 
 		/*
 		* compare battery voltage with constant to determine whether system
@@ -176,6 +178,61 @@ int main(int argc, char **argv) {
 	return EXIT_SUCCESS;
 }
 
+static void read_battery_state(battery *bat) {
+	unsigned int raw;
+
+	raw = mcp3424_get_raw(&adcv, MCP3424_CHANNEL_1);
+	if (adcv.err == MCP3424_ERR) {
+		printf("error: mcp3424_get_raw: %s\n", adcv.errstr);
+		exit(EXIT_FAILURE);
+	}
+	bat->v = MAP(raw, 0, 9999, 0.0, 16.0);
+}
+
+static void read_wind_turbine_state(wind_turbine *wt) {
+	unsigned int raw;
+
+	raw = mcp3424_get_raw(&adcv, MCP3424_CHANNEL_2);
+	if (adcv.err == MCP3424_ERR) {
+		goto error;
+	}
+	wt->v = MAP(raw, 0, 9999, 0.0, 16.0);
+
+	raw = mcp3424_get_raw(&adci, MCP3424_CHANNEL_2);
+	if (adcv.err == MCP3424_ERR) {
+		goto error;
+	}
+	wt->i = MAP(raw, 0, 9999, 0.0, 16.0);
+
+	return;
+
+error:
+	printf("error: mcp3424_get_raw: %s\n", adcv.errstr);
+	exit(EXIT_FAILURE);
+}
+
+static void read_solar_panel_state(solar_panel *sp) {
+	unsigned int raw;
+
+	raw = mcp3424_get_raw(&adcv, MCP3424_CHANNEL_3);
+	if (adcv.err == MCP3424_ERR) {
+		goto error;
+	}
+	sp->v = MAP(raw, 0, 9999, 0.0, 16.0);
+
+	raw = mcp3424_get_raw(&adci, MCP3424_CHANNEL_3);
+	if (adcv.err == MCP3424_ERR) {
+		goto error;
+	}
+	sp->i = MAP(raw, 0, 9999, 0.0, 16.0);
+
+	return;
+
+error:
+	printf("error: mcp3424_get_raw: %s\n", adcv.errstr);
+	exit(EXIT_FAILURE);
+}
+
 static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
 	if (sig == SIGINT) {
 		running = 0;
@@ -183,16 +240,14 @@ static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
 }
 
 /*
-* Returns I2C bus depending on raspberry pi revision
+* Returns RPi revision from /proc/cpuinfo
 */
-const char *get_bus_id(void) {
+static int get_rpi_revision(char *rev) {
 	FILE *fp;
 	char c;
 	char buf[1024];
-	char rev[32];
 	int pos = 0;
 	int n;
-	const char *bus = NULL;
 
 	fp = fopen("/proc/cpuinfo", "r");
 	if (!fp) {
@@ -205,39 +260,35 @@ const char *get_bus_id(void) {
 		do {
 			c = fgetc(fp);
 			if (c != EOF && c != '\n') {
-				buf[pos++] = c;
-				if (pos == sizeof (buf)) {
-					// line too big ya'll
-					return bus;
+				if (pos < sizeof (buf)) {
+					buf[pos++] = c;
+				} else {
+					continue;
 				}
 			}
 		} while (c != EOF && c != '\n');
 		n = sscanf(buf, "Revision : %s", rev);
 		if (n == 1) {
-			if (strcmp(rev, "0002") == 0 || (strcmp(rev, "0003") == 0)) {
-				bus = "/dev/i2c-0";
-			} else {
-				bus = "/dev/i2c-1";
-			}
+			break;
 		}
 	} while (c != EOF);
 
 	fclose(fp);
 
-	return bus;
+	return n;
 }
 
-void use_battery(void) {
+static void use_battery(void) {
 	sys.source = SOURCE_BATTERY;
 	bcm2835_gpio_write(SOURCE_RELAY_PIN, HIGH);
 }
 
-void use_mains(void) {
+static void use_mains(void) {
 	sys.source = SOURCE_MAINS;
 	bcm2835_gpio_write(SOURCE_RELAY_PIN, LOW);
 }
 
-void display(void) {
+static void display(void) {
 	printw("System");
 	/*printf("======\n");
 	printf("Source (S):\t\t%s\n", sys.source == SOURCE_BATTERY ? "Battery" : "Mains");
