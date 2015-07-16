@@ -48,22 +48,60 @@ enum mcp3424_pga mcp3424_get_pga(mcp3424 *m) {
 }
 
 unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
-	int rv;
-	int n;
+	int rv, n;
 	unsigned int raw;
 
 	mcp3424_set_channel(m, channel);
 
-	rv = ioctl(m->fd, I2C_SLAVE, m->addr);
+	rv = ioctl(m->fd, I2C_SLAVE, m->addr); // (need root permissions i believe)
 	if (rv == -1) {
 		snprintf(m->errstr, MCP3424_ERR_LEN, "ioctl: %s", strerror(errno));
 		m->err = MCP3424_ERR;
 		return 0;
 	}
 
-	// will this ever read for than 4 bytes?
-	n = i2c_smbus_read_block_data(m->fd, m->config, m->reading);
+	/*
+	* if the conversion mode is set to one-shot, write config with ready bit
+	* set to 1
+	*/
+	if (mcp3424_get_conversion_mode(m) == MCP3424_CONVERSION_MODE_ONE_SHOT) {
+		rv = i2c_smbus_write_byte(m->fd, m->config | (1 << 7));
+		if (rv == -1) {
+			snprintf(m->errstr, MCP3424_ERR_LEN, "i2c_smbus_write_byte: %s", strerror(errno));
+			m->err = MCP3424_ERR;
+			return 0;
+		}
+	}
 
+	n = 0;
+	do {
+		rv = i2c_smbus_read_block_data(m->fd, m->config, m->reading + n);
+		if (rv == -1) {
+			snprintf(m->errstr, MCP3424_ERR_LEN, "i2c_smbus_read_block_data: %s", strerror(errno));
+			m->err = MCP3424_ERR;
+			return 0;
+		}
+		n += rv;
+	} while (n < 4);
+
+	switch (mcp3424_get_bit_rate(m)) {
+		case MCP3424_BIT_RATE_12:
+			raw = ((m->reading[0] & 0x0f) << 8) | m->reading[1];
+			break;
+		case MCP3424_BIT_RATE_14:
+			raw = ((m->reading[0] & 0x3f) << 8) | m->reading[1];
+			break;
+		case MCP3424_BIT_RATE_16:
+			raw = (m->reading[0] << 8) | m->reading[1];
+			break;
+		case MCP3424_BIT_RATE_18:
+			raw = ((m->reading[0] & 0x03) << 16) | (m->reading[1] << 8) | m->reading[2];
+			break;
+		default:
+			snprintf(m->errstr, MCP3424_ERR_LEN, "invalid bit rate");
+			m->err = MCP3424_ERR;
+			return 0;
+	}
 
 	return raw;
 }
