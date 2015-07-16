@@ -1,0 +1,46 @@
+#ifndef MCP3424_H_
+#define MCP3424_H_
+
+#include <stdint.h>
+
+#define MCP3424_OK 0
+#define MCP3424_ERR -1
+#define MCP3424_ERR_LEN 256
+
+enum mcp3424_conversion_mode {
+	MCP3424_CONVERSION_MODE_ONE_SHOT,
+	MCP3424_CONVERSION_MODE_CONTINUOUS
+};
+
+enum mcp3424_bit_rate {
+	MCP3424_BIT_RATE_12 = 12,
+	MCP3424_BIT_RATE_14 = 14,
+	MCP3424_BIT_RATE_16 = 16,
+	MCP3424_BIT_RATE_18 = 18
+};
+
+enum mcp3424_channel {
+	MCP3424_CHANNEL_1 = 1,
+	MCP3424_CHANNEL_2 = 2,
+	MCP3424_CHANNEL_3 = 3,
+	MCP3424_CHANNEL_4 = 4
+};
+
+typedef struct {
+	int fd;
+	uint8_t addr;
+	uint8_t config;
+	enum mcp3424_bit_rate rate;
+	float pga;
+	float lsb;
+	uint8_t reading[4];
+	int err;
+	char errstr[MCP3424_ERR_LEN];
+} mcp3424;
+
+void mcp3424_init(mcp3424 *m, int fd, uint8_t addr, enum mcp3424_bit_rate rate);
+void mcp3424_set_bit_rate(mcp3424 *m, enum mcp3424_bit_rate rate);
+void mcp3424_set_conversion_mode(mcp3424 *m, enum mcp3424_conversion_mode mode);
+unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel);
+
+#endif /* MCP3424_H_ */
