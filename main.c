@@ -107,10 +107,6 @@ int main(int argc, char **argv) {
 	}
 
 	mcp3424_init(&m, fd, 0x68, MCP3424_BIT_RATE_14);
-	if (m.err == MCP3424_ERR) {
-		printf("error: mcp3424_init: %s\n", m.errstr);
-		return EXIT_FAILURE;
-	}
 
 	/* ====== Interrupt handling ====== */
 
@@ -140,6 +136,10 @@ int main(int argc, char **argv) {
 		* read battery voltage from MCP3424 ADC
 		*/
 		raw = mcp3424_get_raw(&m, MCP3424_CHANNEL_1);
+		if (m.err == MCP3424_ERR) {
+			printf("error: mcp3424_get_raw: %s\n", m.errstr);
+			return EXIT_FAILURE;
+		}
 		bat.v = MAP(raw, 0, 9999, 0.0, 16.0);
 
 		/*
