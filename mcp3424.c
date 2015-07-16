@@ -7,14 +7,14 @@
 #include "mcp3424.h"
 
 static void mcp3424_set_channel(mcp3424 *m, enum mcp3424_channel channel) {
-	assert(channel >= MCP3424_CHANNEL_1 && channel <= MCP3424_CHANNEL_4);
-	m->config &= ~0x06;
-	m->config |= ((channel - 1) << 1);
+	m->config &= ~0x60;
+	m->config |= (channel << 5);
 }
 
 void mcp3424_init(mcp3424 *m, int fd, uint8_t addr, enum mcp3424_bit_rate rate) {
 	m->fd = fd;
 	m->addr = addr;
+	m->config = 0x00;
 	m->pga = 0.5f;
 	m->lsb = 0.0000078125f;
 	m->err = MCP3424_OK;
@@ -24,13 +24,18 @@ void mcp3424_init(mcp3424 *m, int fd, uint8_t addr, enum mcp3424_bit_rate rate) 
 }
 
 void mcp3424_set_bit_rate(mcp3424 *m, enum mcp3424_bit_rate rate) {
-	assert(rate >= MCP3424_BIT_RATE_12 && rate <= MCP3424_BIT_RATE_18);
-	//
+	m->config &= ~0x0c;
+	m->config |= (rate << 2);
 }
 
 void mcp3424_set_conversion_mode(mcp3424 *m, enum mcp3424_conversion_mode mode) {
-	assert(mode >= MCP3424_CONVERSION_MODE_ONE_SHOT && mode <= MCP3424_CONVERSION_MODE_CONTINUOUS);
-	//
+	m->config &= ~0x10;
+	m->config |= (mode << 4);
+}
+
+void mcp3424_set_pga(mcp3424 *m, enum mcp3424_pga pga) {
+	m->config &= ~0x03;
+	m->config |= pga;
 }
 
 unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
