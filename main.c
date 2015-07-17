@@ -1,9 +1,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <bcm2835.h>
 #include <linux/i2c-dev.h>
@@ -19,12 +19,17 @@
 #define ADCI_ADDR 0x69 // current
 
 #define BAT_LOW_V 12.0f // v
-#define BAT_LOW_V_HYS 1.0f // change in v
+#define BAT_LOW_V_HYS 2.0f // change in v
+
+#define BATTERY_V_RAW_MIN 0
+#define BATTERY_V_RAW_MAX 1860
+#define BATTERY_V_MIN 0.0f
+#define BATTERY_V_MAX 12.98f
 
 /* ====== GPIO ====== */
 
 #define BATTERY_VOLTAGE_PIN 10
-#define SOURCE_RELAY_PIN 11
+#define SOURCE_RELAY_PIN RPI_GPIO_P1_07
 
 /* ====== Structures ====== */
 
@@ -101,8 +106,8 @@ int main(int argc, char **argv) {
 
 	while (running) {
 		read_battery_state(&bat);
-		read_wind_turbine_state(&wt);
-		read_solar_panel_state(&sp);
+		//read_wind_turbine_state(&wt);
+		//read_solar_panel_state(&sp);
 
 		/*
 		* compare battery voltage with constant to determine whether system
@@ -121,9 +126,9 @@ int main(int argc, char **argv) {
 				use_mains();
 			}
 		}
-
-		display_measurements();
-		display_status();
+		
+		//display_measurements();
+		//display_status();
 		bcm2835_delay(100);
 
 		it++;
@@ -197,7 +202,7 @@ static void initialise(void) {
 	}
 
 	/* ====== ncurses ====== */
-
+/*
 	initscr(); // start ncurses
 	cbreak(); //
 	noecho();
@@ -209,6 +214,7 @@ static void initialise(void) {
 	wmove(win1, 1, 1);
 	wprintw(win1, "12v");
 	wrefresh(win1);
+*/
 }
 
 /*
@@ -267,11 +273,11 @@ static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
 }
 
 static void quit(void) {
-	window_destroy(win3);
+/*	window_destroy(win3);
 	window_destroy(win2);
 	window_destroy(win1);
 	endwin();
-
+*/
 	printf("closing mcp3424...\n");
 	close(fd);
 
@@ -296,12 +302,23 @@ static void window_destroy(WINDOW *win) {
 static void read_battery_state(battery *bat) {
 	unsigned int raw;
 
+	static unsigned int avg = 0;
+	static float avg2 = 0.0f;
+	static unsigned int i = 1;
+
 	raw = mcp3424_get_raw(&adcv, MCP3424_CHANNEL_1);
 	if (adcv.err == MCP3424_ERR) {
 		printf("error: mcp3424_get_raw: %s\n", adcv.errstr);
 		exit(EXIT_FAILURE);
 	}
-	bat->v = MAP(raw, 0, 9999, 0.0, 16.0);
+
+	bat->v = MAP(raw, BATTERY_V_RAW_MIN, BATTERY_V_RAW_MAX, BATTERY_V_MIN, BATTERY_V_MAX);
+	
+	avg += raw;
+	avg2 += bat->v;
+	i++;
+
+	printf("raw = %u, bat->v = %0.2f, avg = %u, avg2 (v) = %0.2f\n", raw, bat->v, avg / i, avg2 / i);
 }
 
 static void read_wind_turbine_state(wind_turbine *wt) {
@@ -350,12 +367,14 @@ error:
 
 static void use_battery(void) {
 	sys.source = SOURCE_BATTERY;
-	bcm2835_gpio_write(SOURCE_RELAY_PIN, HIGH);
+	bcm2835_gpio_write(SOURCE_RELAY_PIN, LOW);
+	printf("using battery\n");
 }
 
 static void use_mains(void) {
 	sys.source = SOURCE_MAINS;
-	bcm2835_gpio_write(SOURCE_RELAY_PIN, LOW);
+	bcm2835_gpio_write(SOURCE_RELAY_PIN, HIGH);
+	printf("using mains\n");
 }
 
 static void display_measurements(void) {
