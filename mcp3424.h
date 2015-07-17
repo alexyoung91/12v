@@ -37,7 +37,7 @@ typedef struct {
 	int fd;
 	uint8_t addr;
 	uint8_t config;
-	uint8_t reading[32]; // max number of bytes i2c_smbus_read_block_data reads
+	uint8_t reading[4];
 	int err;
 	char errstr[MCP3424_ERR_LEN];
 } mcp3424;

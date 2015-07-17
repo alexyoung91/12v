@@ -5,9 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <bcm2835.h>
 #include <linux/i2c-dev.h>
 #include <ncurses.h>
-#include <bcm2835.h>
 #include "mcp3424.h"
 
 #define MAP(val, from_min, from_max, to_min, to_max) \
@@ -33,7 +33,7 @@ typedef struct {
 		SOURCE_BATTERY,
 		SOURCE_MAINS
 	} source;
-} system_12v;
+} system12v;
 
 typedef struct {
 	float v;
@@ -50,95 +50,55 @@ typedef struct {
 	float v;
 } battery;
 
+typedef struct {
+	float i;
+} load;
+
 /* ====== Prototypes ====== */
+
+static void initialise(void);
+static int get_rpi_revision(char *rev);
+static void sig_handler(int sig, siginfo_t *siginfo, void *context);
+static WINDOW *window_create(int x, int y, int width, int height);
 
 static void read_battery_state(battery *bat);
 static void read_wind_turbine_state(wind_turbine *wt);
 static void read_solar_panel_state(solar_panel *sp);
-static void sig_handler(int sig, siginfo_t *siginfo, void *context);
-static int get_rpi_revision(char *rev);
 static void use_battery(void);
 static void use_mains(void);
-static void display(void);
+static void display_measurements(void);
+static void display_status(void);
+
+static void window_destroy(WINDOW *win);
+static void quit(void);
 
 /* ====== Globals ====== */
 
+static int fd;
 static mcp3424 adcv, adci;
-static int running;
-static system_12v sys;
+static WINDOW *win1; // title
+static WINDOW *win2; // measurements
+static WINDOW *win3; // status
+
+static system12v sys;
 static battery bat;
 static wind_turbine wt;
 static solar_panel sp;
+static int running = 1;
+static unsigned int it = 0;
 
 /* ====== Entry ====== */
 
 int main(int argc, char **argv) {
-	int rv;
-	char rev[32];
-	const char *filename;
-	int fd;
-	struct sigaction act;
+	initialise();
 
-	/* ====== BCM2835 ====== */
-
-	// with debug set GPIO is not actually used
-	bcm2835_set_debug(1);
-
-	printf("initialising bcm2835...\n");
-	rv = bcm2835_init();
-	if (!rv) {
-		printf("error: could not initialise bcm2835\n");
-		return EXIT_FAILURE;
-	}
-
-	bcm2835_gpio_fsel(SOURCE_RELAY_PIN, BCM2835_GPIO_FSEL_OUTP);
-
-	/* ====== MCP3424 ====== */
-
-	printf("initialising mcp3424...\n");
-	rv = get_rpi_revision(rev);
-	if (rv == 0) {
-		printf("error: could not determine raspberry pi revision\n");
-		return EXIT_FAILURE;
-	}
-	if (strcmp(rev, "0002") == 0 || strcmp(rev, "0003") == 0) {
-		filename = "/dev/i2c-0";
-	} else {
-		filename = "/dev/i2c-1";
-	}
-
-	fd = open(filename, O_RDWR);
-	if (fd == -1) {
-		printf("error: could not open %s: %s\n", filename, strerror(errno));
-		return EXIT_FAILURE;
-	}
-
-	mcp3424_init(&adcv, fd, ADCV_ADDR, MCP3424_BIT_RATE_14);
-	mcp3424_init(&adci, fd, ADCI_ADDR, MCP3424_BIT_RATE_14);
-
-	/* ====== Interrupt handling ====== */
-
-	memset(&act, 0, sizeof (act));
-	act.sa_sigaction = &sig_handler;
-	act.sa_flags = SA_SIGINFO;
-
-	printf("registering signal handler...\n");
-	rv = sigaction(SIGINT, &act, NULL);
-	if (rv == -1) {
-		printf("error: sigaction: %s\n", strerror(errno));
-		return EXIT_FAILURE;
-	}
-
-	memset(&sys, 0, sizeof (system_12v));
-	sys.source = SOURCE_BATTERY;
-
+	memset(&sys, 0, sizeof (system12v));
 	memset(&bat, 0, sizeof (battery));
 	memset(&wt, 0, sizeof (wind_turbine));
 	memset(&sp, 0, sizeof (solar_panel));
 
-	initscr();
+	sys.source = SOURCE_BATTERY;
 
-	running = 1;
 	while (running) {
 		read_battery_state(&bat);
 		read_wind_turbine_state(&wt);
@@ -162,11 +122,153 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		display();
-
+		display_measurements();
+		display_status();
 		bcm2835_delay(500);
+		it++;
 	}
 
+	quit();
+
+	return EXIT_SUCCESS;
+}
+
+static void initialise(void) {
+	int rv;
+	char rev[32];
+	const char *filename;
+	struct sigaction act;
+
+	/* ====== BCM2835 ====== */
+
+	// with debug set to 1 GPIO is not actually used
+	bcm2835_set_debug(0);
+
+	printf("initialising bcm2835...\n");
+	rv = bcm2835_init();
+	if (!rv) {
+		// bcm2835_init prints error message
+		exit(EXIT_FAILURE);
+	}
+
+	// set SOURCE_RELAY_PIN to output
+	bcm2835_gpio_fsel(SOURCE_RELAY_PIN, BCM2835_GPIO_FSEL_OUTP);
+
+	/* ====== MCP3424 ====== */
+
+	printf("initialising mcp3424...\n");
+	rv = get_rpi_revision(rev);
+	if (rv == 0) {
+		printf("error: could not determine raspberry pi revision\n");
+		exit(EXIT_FAILURE);
+	}
+	if (strcmp(rev, "0002") == 0 || strcmp(rev, "0003") == 0) {
+		filename = "/dev/i2c-0";
+	} else {
+		filename = "/dev/i2c-1";
+	}
+
+	fd = open(filename, O_RDWR);
+	if (fd == -1) {
+		printf("error: could not open %s: %s\n", filename, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	mcp3424_init(&adcv, fd, ADCV_ADDR, MCP3424_BIT_RATE_14);
+	mcp3424_init(&adci, fd, ADCI_ADDR, MCP3424_BIT_RATE_14);
+
+	/* ====== Signal handling ====== */
+
+	memset(&act, 0, sizeof (act));
+	act.sa_sigaction = &sig_handler;
+	act.sa_flags = SA_SIGINFO;
+
+	printf("registering signal handler...\n");
+	rv = sigaction(SIGINT, &act, NULL);
+	if (rv == -1) {
+		printf("error: sigaction: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	rv = sigaction(SIGWINCH, &act, NULL);
+	if (rv == -1) {
+		printf("error: sigaction: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	/* ====== ncurses ====== */
+
+	initscr();
+	cbreak();
+	noecho();
+	keypad(stdscr, TRUE);
+	win1 = window_create(0, 0, 120, 4);
+	win2 = window_create(0, 4, 80, 26);
+	win3 = window_create(80, 4, 40, 26);
+
+	wmove(win1, 1, 1);
+	wprintw(win1, "12v");
+	wrefresh(win1);
+}
+
+/*
+* Returns RPi revision from /proc/cpuinfo
+*/
+static int get_rpi_revision(char *rev) {
+	FILE *fp;
+	char c;
+	char buf[1024];
+	int pos = 0;
+	int n;
+
+	fp = fopen("/proc/cpuinfo", "r");
+	if (!fp) {
+		printf("err: could not open \"/proc/cpuinfo\"\n");
+		exit(EXIT_FAILURE);
+	}
+
+	do {
+		pos = 0;
+		do {
+			c = fgetc(fp);
+			if (c != EOF && c != '\n') {
+				if (pos < sizeof (buf)) {
+					buf[pos++] = c;
+				} else {
+					continue;
+				}
+			}
+		} while (c != EOF && c != '\n');
+		n = sscanf(buf, "Revision : %s\n", rev);
+		if (n == 0) {
+			continue;
+		} else {
+			rev[4] = '\0';
+			break;
+		}
+	} while (c != EOF);
+
+	fclose(fp);
+
+	return n;
+}
+
+static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
+	switch (sig) {
+		case SIGINT:
+			running = 0;
+			break;
+		case SIGWINCH:
+			printf("window resized\n");
+			break;
+		default:
+			break;
+	}
+}
+
+static void quit(void) {
+	window_destroy(win3);
+	window_destroy(win2);
+	window_destroy(win1);
 	endwin();
 
 	printf("closing mcp3424...\n");
@@ -174,8 +276,20 @@ int main(int argc, char **argv) {
 
 	printf("closing bcm2835...\n");
 	bcm2835_close();
+}
 
-	return EXIT_SUCCESS;
+static WINDOW *window_create(int x, int y, int width, int height) {
+	WINDOW *win;
+
+	win = newwin(height, width, y, x);
+	wborder(win, 0, 0, 0, 0, 0, 0, 0, 0);
+	wrefresh(win);
+
+	return win;
+}
+
+static void window_destroy(WINDOW *win) {
+	delwin(win);
 }
 
 static void read_battery_state(battery *bat) {
@@ -233,51 +347,6 @@ error:
 	exit(EXIT_FAILURE);
 }
 
-static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
-	if (sig == SIGINT) {
-		running = 0;
-	}
-}
-
-/*
-* Returns RPi revision from /proc/cpuinfo
-*/
-static int get_rpi_revision(char *rev) {
-	FILE *fp;
-	char c;
-	char buf[1024];
-	int pos = 0;
-	int n;
-
-	fp = fopen("/proc/cpuinfo", "r");
-	if (!fp) {
-		printf("err: could not open \"/proc/cpuinfo\"\n");
-		exit(EXIT_FAILURE);
-	}
-
-	do {
-		pos = 0;
-		do {
-			c = fgetc(fp);
-			if (c != EOF && c != '\n') {
-				if (pos < sizeof (buf)) {
-					buf[pos++] = c;
-				} else {
-					continue;
-				}
-			}
-		} while (c != EOF && c != '\n');
-		n = sscanf(buf, "Revision : %s", rev);
-		if (n == 1) {
-			break;
-		}
-	} while (c != EOF);
-
-	fclose(fp);
-
-	return n;
-}
-
 static void use_battery(void) {
 	sys.source = SOURCE_BATTERY;
 	bcm2835_gpio_write(SOURCE_RELAY_PIN, HIGH);
@@ -288,29 +357,47 @@ static void use_mains(void) {
 	bcm2835_gpio_write(SOURCE_RELAY_PIN, LOW);
 }
 
-static void display(void) {
-	printw("System");
-	/*printf("======\n");
-	printf("Source (S):\t\t%s\n", sys.source == SOURCE_BATTERY ? "Battery" : "Mains");
-	printf("\n");
+static void display_measurements(void) {
+	wclear(win2);
+	wmove(win2, 1, 1);
+	wprintw(win2, "Measurements");
+	wmove(win2, 2, 1);
+	whline(win2, ACS_HLINE, 78);
+	wmove(win2, 4, 0);
 
-	printf("Wind Turbine\n");
-	printf("============\n");
-	printf("Voltage (V) / V:\t%.2f\n", wt.v);
-	printf("Current (I) / A:\t%.2f\n", wt.v);
-	printf("Braked (B):\t\t%s\n", wt.braked == 0 ? "No" : "Yes");
-	printf("\n");
+	wprintw(win2, " Wind Turbine\n");
+	wprintw(win2, " ============\n");
+	wprintw(win2, " Voltage (V) / V:\t%.2f\n", wt.v);
+	wprintw(win2, " Current (I) / A:\t%.2f\n", wt.v);
+	wprintw(win2, " Braked (B):\t\t%s\n", wt.braked == 0 ? "No" : "Yes");
+	wprintw(win2, " \n");
 
-	printf("Solar Panel\n");
-	printf("===========\n");
-	printf("Voltage (V) / V:\t%.2f\n", sp.v);
-	printf("Current (I) / A:\t%.2f\n", sp.v);
-	printf("\n");
+	wprintw(win2, " Solar Panel\n");
+	wprintw(win2, " ===========\n");
+	wprintw(win2, " Voltage (V) / V:\t%.2f\n", sp.v);
+	wprintw(win2, " Current (I) / A:\t%.2f\n", sp.v);
+	wprintw(win2, " \n");
 
-	printf("Battery\n");
-	printf("=======\n");
-	printf("Voltage (V) / V:\t%.2f\n", bat.v);
-	printf("\n");*/
+	wprintw(win2, " Battery\n");
+	wprintw(win2, " =======\n");
+	wprintw(win2, " Voltage (V) / V:\t%.2f\n", bat.v);
+	wprintw(win2, " \n");
 
-	refresh();
+	wborder(win2, 0, 0, 0, 0, 0, 0, 0, 0);
+	wrefresh(win2);
+}
+
+static void display_status(void) {
+	wmove(win3, 1, 1);
+	wprintw(win3, "Status");
+	wmove(win3, 2, 1);
+	whline(win3, ACS_HLINE, 38);
+	wmove(win3, 4, 0);
+
+	wprintw(win3, " System Source (S):\t%s\n", sys.source == SOURCE_BATTERY ? "Battery" : "Mains");
+	wprintw(win3, " Iteration (it):\t%u\n", it);
+	wprintw(win3, " \n");
+
+	wborder(win3, 0, 0, 0, 0, 0, 0, 0, 0);
+	wrefresh(win3);
 }

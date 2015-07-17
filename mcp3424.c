@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 #include "mcp3424.h"
 
 static void mcp3424_set_channel(mcp3424 *m, enum mcp3424_channel channel) {
@@ -66,6 +67,7 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 	*/
 	if (mcp3424_get_conversion_mode(m) == MCP3424_CONVERSION_MODE_ONE_SHOT) {
 		rv = i2c_smbus_write_byte(m->fd, m->config | (1 << 7));
+		//printf("i2c_smbus_write_byte rv: %d\n", rv);
 		if (rv == -1) {
 			snprintf(m->errstr, MCP3424_ERR_LEN, "i2c_smbus_write_byte: %s", strerror(errno));
 			m->err = MCP3424_ERR;
@@ -73,16 +75,21 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 		}
 	}
 
-	n = 0;
+	/*n = 0;
 	do {
 		rv = i2c_smbus_read_block_data(m->fd, m->config, m->reading + n);
+		printf("read n: %d\n", n);
 		if (rv == -1) {
 			snprintf(m->errstr, MCP3424_ERR_LEN, "i2c_smbus_read_block_data: %s", strerror(errno));
 			m->err = MCP3424_ERR;
 			return 0;
 		}
 		n += rv;
-	} while (n < 4);
+	} while (n < 4);*/
+
+	n = read(m->fd, m->reading, 4);
+	//printf("read n: %d\n", n);
+	//printf("0x%x 0x%x 0x%x 0x%x\n", m->reading[0], m->reading[1], m->reading[2], m->reading[3]);
 
 	switch (mcp3424_get_bit_rate(m)) {
 		case MCP3424_BIT_RATE_12:
@@ -102,6 +109,8 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 			m->err = MCP3424_ERR;
 			return 0;
 	}
+
+	//printf("raw: %u\n", raw);
 
 	return raw;
 }
