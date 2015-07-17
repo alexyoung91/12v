@@ -124,7 +124,8 @@ int main(int argc, char **argv) {
 
 		display_measurements();
 		display_status();
-		bcm2835_delay(500);
+		bcm2835_delay(100);
+
 		it++;
 	}
 
@@ -197,8 +198,8 @@ static void initialise(void) {
 
 	/* ====== ncurses ====== */
 
-	initscr();
-	cbreak();
+	initscr(); // start ncurses
+	cbreak(); //
 	noecho();
 	keypad(stdscr, TRUE);
 	win1 = window_create(0, 0, 120, 4);

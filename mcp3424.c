@@ -65,7 +65,7 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 	* if the conversion mode is set to one-shot, write config with ready bit
 	* set to 1
 	*/
-	if (mcp3424_get_conversion_mode(m) == MCP3424_CONVERSION_MODE_ONE_SHOT) {
+/*	if (mcp3424_get_conversion_mode(m) == MCP3424_CONVERSION_MODE_ONE_SHOT) {
 		rv = i2c_smbus_write_byte(m->fd, m->config | (1 << 7));
 		//printf("i2c_smbus_write_byte rv: %d\n", rv);
 		if (rv == -1) {
@@ -73,7 +73,7 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 			m->err = MCP3424_ERR;
 			return 0;
 		}
-	}
+	}*/
 
 	/*n = 0;
 	do {
@@ -86,6 +86,10 @@ unsigned int mcp3424_get_raw(mcp3424 *m, enum mcp3424_channel channel) {
 		}
 		n += rv;
 	} while (n < 4);*/
+
+	m->config |= (1 << 7);
+	n = write(m->fd, &m->config, 1); // write config with ready bit
+	m->config &= ~(1 << 7);
 
 	n = read(m->fd, m->reading, 4);
 	//printf("read n: %d\n", n);
