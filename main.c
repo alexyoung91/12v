@@ -18,7 +18,7 @@
 #define ADCV_ADDR 0x68 // voltage
 #define ADCI_ADDR 0x69 // current
 
-#define BAT_LOW_V 12.0f // v
+#define BAT_LOW_V 12.00f // v
 #define BAT_LOW_V_HYS 2.0f // change in v
 
 #define BATTERY_V_RAW_MIN 0
@@ -180,8 +180,9 @@ static void initialise(void) {
 		exit(EXIT_FAILURE);
 	}
 
-	mcp3424_init(&adcv, fd, ADCV_ADDR, MCP3424_BIT_RATE_14);
-	mcp3424_init(&adci, fd, ADCI_ADDR, MCP3424_BIT_RATE_14);
+	mcp3424_init(&adcv, fd, ADCV_ADDR, MCP3424_BIT_RATE_16);
+	mcp3424_set_conversion_mode(&adcv, MCP3424_CONVERSION_MODE_CONTINUOUS);
+	//mcp3424_init(&adci, fd, ADCI_ADDR, MCP3424_BIT_RATE_14);
 
 	/* ====== Signal handling ====== */
 
@@ -301,24 +302,27 @@ static void window_destroy(WINDOW *win) {
 
 static void read_battery_state(battery *bat) {
 	unsigned int raw;
-
+/*
 	static unsigned int avg = 0;
 	static float avg2 = 0.0f;
 	static unsigned int i = 1;
-
+*/
 	raw = mcp3424_get_raw(&adcv, MCP3424_CHANNEL_1);
 	if (adcv.err == MCP3424_ERR) {
 		printf("error: mcp3424_get_raw: %s\n", adcv.errstr);
 		exit(EXIT_FAILURE);
 	}
 
-	bat->v = MAP(raw, BATTERY_V_RAW_MIN, BATTERY_V_RAW_MAX, BATTERY_V_MIN, BATTERY_V_MAX);
-	
+	//bat->v = MAP(raw, BATTERY_V_RAW_MIN, BATTERY_V_RAW_MAX, BATTERY_V_MIN, BATTERY_V_MAX);
+	bat->v = MAP(raw, 0, 32768, 0.0f, 59.8f);
+
+	printf("%u - raw: %u, v: %0.2f\n", it, raw, bat->v);
+/*
 	avg += raw;
 	avg2 += bat->v;
 	i++;
-
 	printf("raw = %u, bat->v = %0.2f, avg = %u, avg2 (v) = %0.2f\n", raw, bat->v, avg / i, avg2 / i);
+*/
 }
 
 static void read_wind_turbine_state(wind_turbine *wt) {
