@@ -29,3 +29,8 @@ The application needs to be run as root to access /dev/mem for bcm2835 functions
 ## Notes
 
 mcp3424 module is based on code found in [this](https://github.com/abelectronicsuk/ABElectronics_Python_Libraries/tree/master/ADCPi) repository. Two mcp3424 structures will be needed using ABElectronics' ADCPi.
+
+## Todo
+
+- When program exits, switch power to mains for safety
+- Mutex on gusts_results when accessing from main thread
