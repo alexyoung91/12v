@@ -8,6 +8,7 @@
 #include <bcm2835.h>
 #include <linux/i2c-dev.h>
 #include <ncurses.h>
+#include "gusts.h"
 #include "mcp3424.h"
 
 #define MAP(val, from_min, from_max, to_min, to_max) \
@@ -18,7 +19,7 @@
 #define ADCV_ADDR 0x68 // voltage
 #define ADCI_ADDR 0x69 // current
 
-#define BAT_LOW_V 12.00f // v
+#define BAT_LOW_V 12.0f // v
 #define BAT_LOW_V_HYS 2.0f // change in v
 
 #define BATTERY_V_RAW_MIN 0
@@ -92,9 +93,13 @@ static solar_panel sp;
 static int running = 1;
 static unsigned int it = 0;
 
+static gusts_results gr;
+
 /* ====== Entry ====== */
 
 int main(int argc, char **argv) {
+	int rv;
+
 	initialise();
 
 	memset(&sys, 0, sizeof (system12v));
@@ -103,6 +108,8 @@ int main(int argc, char **argv) {
 	memset(&sp, 0, sizeof (solar_panel));
 
 	sys.source = SOURCE_BATTERY;
+
+	rv = gusts_get(&gr);
 
 	while (running) {
 		read_battery_state(&bat);
@@ -126,7 +133,7 @@ int main(int argc, char **argv) {
 				use_mains();
 			}
 		}
-		
+
 		//display_measurements();
 		//display_status();
 		bcm2835_delay(100);
@@ -314,7 +321,7 @@ static void read_battery_state(battery *bat) {
 	}
 
 	//bat->v = MAP(raw, BATTERY_V_RAW_MIN, BATTERY_V_RAW_MAX, BATTERY_V_MIN, BATTERY_V_MAX);
-	bat->v = MAP(raw, 0, 32768, 0.0f, 59.8f);
+	bat->v = MAP(raw, 0, 32768, 0.0f, 62.0f);
 
 	printf("%u - raw: %u, v: %0.2f\n", it, raw, bat->v);
 /*
